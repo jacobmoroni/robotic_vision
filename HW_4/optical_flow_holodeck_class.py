@@ -56,12 +56,15 @@ feature_params = dict( maxCorners = 500,
 class holodeck_fly:
     """docstring for holodeck_fly."""
     def __init__(self):
-        self.init_plots(5)
+        self.show_plots = True
+        if self.show_plots == True:
+            self.init_plots(5)
 
         self.track_len = 5
         self.detect_interval = 1
         self.tracks = []
         self.frame_idx = 0
+
         # self.cam = cv2.VideoCapture(0)
 
         self.running = True
@@ -83,6 +86,7 @@ class holodeck_fly:
         self.altitude_c = 0
         self.optical = 1
         self.position_command = 1
+        self.optical_command = 1
 
         self.ALTITUDE_UP = K_w
         self.ALTITUDE_DOWN = K_s
@@ -93,13 +97,17 @@ class holodeck_fly:
         self.RIGHT_VEL = K_RIGHT
         self.LEFT_VEL = K_LEFT
         self.OPTIC = K_o
+        self.NOT_OPTIC = K_p
         self.POSITION_COMMAND = K_1
+        self.POSITION_COMMAND_CANCEL = K_2
+        self.OPTIC_COMMAND = K_3
+        self.OPTIC_COMMAND_CANCEL = K_4
+        self.RESET = K_r
         self.QUIT = K_ESCAPE
 
         self.firstframe= True
         self.firsttime = True
-        self.location_c = [-6.818,-30,1.6,5.0] #x,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
-        # self.canyon_area_l = 100:410,0:200
+        self.location_c = [-6.8, -15,1.6,5]#[0,-20,1.6,5.0] #x-6.818,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
         p_grid = np.array([[0,0]])
         for i in range(0,11):
             for j in range(0,11):
@@ -114,6 +122,9 @@ class holodeck_fly:
         self.prev_gray = []
         self.sim_step = 0
         self.dt = 1/30.0
+        self.h_c_prev = 5
+        self.u_c_opt = 0
+        self.v_c_opt = 0
 
     def init_plots(self, plotting_freq):
         self.plotting_states = True
@@ -213,8 +224,8 @@ class holodeck_fly:
         yaw_diff = self.unwrap(yaw_diff)
         yaw_rate_c = k_p_yaw*(yaw_diff) + k_d_yaw*(r)
         theta_c = -k_p_theta*(self.u_c-u) + k_d_theta*(r)
-        phi_c = self.saturate(phi_c,.6)
-        theta_c = self.saturate(theta_c,.6)
+        phi_c = self.saturate(phi_c,.3)
+        theta_c = self.saturate(theta_c,.3)
         vel_command = np.array([phi_c,theta_c,yaw_rate_c,h_c])
         return vel_command
 
@@ -244,6 +255,11 @@ class holodeck_fly:
 
         u_c = k_u*(x_diff)
         v_c = k_v*(y_diff)
+
+        if (x_diff**2 + y_diff**2)**(1/2) < 1:
+            self.optical_command = 4
+            self.optical = 4
+            self.position_command = 0
 
         return u_c,v_c,yaw_c,h_c
 
@@ -323,11 +339,21 @@ class holodeck_fly:
             self.v_c = 0
         if keys[self.QUIT]:
             self.running = False
+        if keys[self.RESET]:
+            self.env.reset()
         if keys[self.OPTIC]:
             pygame.key.set_repeat(800, 800)
             self.optical +=1
+        if keys[self.NOT_OPTIC]:
+            self.optical -= 1
         if keys[self.POSITION_COMMAND]:
-            self.position_command +=1
+            self.position_command += 1
+        if keys[self.POSITION_COMMAND_CANCEL]:
+            self.position_command -= 1
+        if keys[self.OPTIC_COMMAND]:
+            self.optical_command += 1
+        if keys[self.OPTIC_COMMAND_CANCEL]:
+            self.optical_command -= 1
         # return self.u_c,self.v_c,self.yaw_c,self.altitude_c,self.running
 
     def optical_flow(self,pixels):
@@ -338,6 +364,11 @@ class holodeck_fly:
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         vis = frame.copy()
 
+        if self.position_command >2:
+            draw_str(vis, (255,20), 'Position Command')
+        if self.optical_command >2:
+            draw_str(vis, (255,20), 'Canyon Following')
+
         if len(self.tracks) > 0:
             img0, img1 = self.prev_gray_2, frame_gray
             p0 = np.float32([tr[-1] for tr in self.tracks]).reshape(-1, 1, 2)
@@ -346,7 +377,8 @@ class holodeck_fly:
             diff = p1-p0
             canyon_left = []
             canyon_right = []
-            obstacle = []
+            obstacle_left = []
+            obstacle_right = []
             alt_vel = []
 
             # Find partitions for different velocities
@@ -355,13 +387,16 @@ class holodeck_fly:
                     canyon_left.append(i)
                 if 100 < x[1] < 410 and 325 < x[0] < 510:
                     canyon_right.append(i)
-                if 140 < x[1] < 370 and 140 < x[0] < 370:
-                    obstacle.append(i)
+                if 140 < x[1] < 370 and 140 < x[0] < 255:
+                    obstacle_left.append(i)
+                if 140 < x[1] < 370 and 255 < x[0] < 370:
+                    obstacle_right.append(i)
                 if 325 < x[1] < 510 and 140 < x[0] < 370:
                     alt_vel.append(i)
             canyon_left = np.array([canyon_left])
             canyon_right = np.array([canyon_right])
-            obstacle = np.array([obstacle])
+            obstacle_left = np.array([obstacle_left])
+            obstacle_right = np.array([obstacle_right])
             alt_vel = np.array([alt_vel])
 
             # Partition into different velocities
@@ -370,24 +405,42 @@ class holodeck_fly:
                 canyon_left_vel.append(diff[num][0])
                 # cv2.circle(vis,self.tracks[num][0],5,(0,0,255),1)
             canyon_left_vel = np.array(canyon_left_vel)
+
             canyon_right_vel = []
             for num in canyon_right[0]:
                 canyon_right_vel.append(diff[num][0])
             canyon_right_vel = np.array(canyon_right_vel)
+
             alt_vel_vel = []
             for num in alt_vel[0]:
                 alt_vel_vel.append(diff[num][0])
             alt_vel_vel = np.array(alt_vel_vel)
 
+            obstacle_left_vel = []
+            for num in obstacle_left[0]:
+                obstacle_left_vel.append(diff[num][0])
+            obstacle_left_vel = np.array(alt_vel_vel)
+
+            obstacle_right_vel = []
+            for num in obstacle_right[0]:
+                obstacle_right_vel.append(diff[num][0])
+            obstacle_right_vel = np.array(alt_vel_vel)
+
+
+
             #sum velocities in partitions
             canyon_left_vel_sum = sum(canyon_left_vel)
             canyon_right_vel_sum = sum(canyon_right_vel)
             alt_vel_vel_sum = sum(alt_vel_vel)
+            obstacle_left_vel_sum = sum(obstacle_left_vel)
+            obstacle_right_vel_sum = sum(obstacle_right_vel)
 
             #Plot partition velocity arrows
-            cv2.arrowedLine(vis, (92,255), (92+int(canyon_left_vel_sum[0]),255+int(canyon_left_vel_sum[1])), (0,255,0), 2) #int(20*canyon_left_vel_sum[0][0]))
-            cv2.arrowedLine(vis, (417,255), (417+int(canyon_right_vel_sum[0]),255+int(canyon_right_vel_sum[1])), (0,255,0), 2) #+int(20*canyon_right_vel_sum[0][0])
-            cv2.arrowedLine(vis, (255,417), (255+int(alt_vel_vel_sum[0]),417++int(alt_vel_vel_sum[1])), (0,0,255), 2) #+int(20*canyon_right_vel_sum[0][0])
+            cv2.arrowedLine(vis, (92,255), (92+int(canyon_left_vel_sum[0]),255+int(canyon_left_vel_sum[1])), (0,255,0), 2)
+            cv2.arrowedLine(vis, (417,255), (417+int(canyon_right_vel_sum[0]),255+int(canyon_right_vel_sum[1])), (0,255,0), 2)
+            cv2.arrowedLine(vis, (255,417), (255+int(alt_vel_vel_sum[0]),417+int(alt_vel_vel_sum[1])), (0,0,255), 2)
+            cv2.arrowedLine(vis, (197,255), (197+int(obstacle_left_vel_sum[0]),255+int(obstacle_left_vel_sum[1])), (255,0,0), 2)
+            cv2.arrowedLine(vis, (312,255), (312+int(obstacle_right_vel_sum[0]),255+int(obstacle_right_vel_sum[1])), (255,0,0), 2)
 
             #plot movement of the tracked grid
             new_tracks = []
@@ -417,7 +470,6 @@ class holodeck_fly:
             mask[:] = 255
             for x, y in [np.int32(tr[-1]) for tr in self.tracks]:
                 cv2.circle(mask, (x, y), 5, 0, -1)
-            # p = cv2.goodFeaturesToTrack(frame_gray, mask = mask, **feature_params)
             p = self.p_grid
             if p is not None:
                 for x, y in np.float32(p).reshape(-1, 2):
@@ -433,16 +485,30 @@ class holodeck_fly:
         cv2.imshow('lk_track', vis)
         return canyon_left_vel_sum,canyon_right_vel_sum,alt_vel_vel_sum
 
+    def canyon_follow_command(self,clvs,crvs):
+        k_canyon = 1
+        v_c = k_canyon*(clvs[0]+crvs[0])/(clvs[0]-crvs[0])
+        return v_c
+    def alt_vel_command(self,avvs,body_vel,location, h_c_prev):
+        hdot = 4.4/5 - 100/avvs[1]
+        # print (hdot)
+        h_c = h_c_prev+1/30*hdot
+        return h_c
+
     def run(self):
         while self.running == True :
             pygame.event.pump() #this clears events to make sure fresh ones come in
             self.fetch_keys()
 
-            if self.position_command %2 ==0:
+            if self.position_command > 2:
                 u_c,v_c,yaw_c,h_c = self.position_controller(location,eulers[2])
                 command_input = np.array([u_c,v_c,yaw_c,h_c])
                 self.altitude_c = h_c
                 # print (command_input)
+            elif self.optical_command > 2:
+                self.yaw_c_opt = self.yaw_c
+                self.h_c_opt = self.h_c_prev
+                command_input = np.array([self.u_c_opt,self.v_c_opt,self.yaw_c_opt,self.h_c_opt])
             else:
                 command_input = np.array([self.u_c,self.v_c,self.yaw_c,self.altitude_c])
 
@@ -476,10 +542,16 @@ class holodeck_fly:
             # print (location,+eulers[2])
 
             self.update_state_mat(command_output,command_input,eulers,location,body_vel,velocity,imu)
-            self.update_plots(command_output,command_input,eulers,location,body_vel,velocity,imu)
-            if self.optical%2 == 0:
+            if self.show_plots == True:
+                self.update_plots(command_output,command_input,eulers,location,body_vel,velocity,imu)
+            if self.optical > 2:
                 clvs,crvs,avvs = self.optical_flow(pixels)
-                # print (clvs
+                if self.optical_command >2:
+                    self.u_c_opt  = 5
+                    self.v_c_opt = self.canyon_follow_command(clvs,crvs)
+                    self.h_c_prev = self.alt_vel_command(avvs,body_vel,location, self.h_c_prev)
+                    # print (self.h_c_prev)
+
 
             if savefile == True:
                 sio.savemat(outfile,self.state_mat)
