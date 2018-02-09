@@ -107,7 +107,7 @@ class holodeck_fly:
 
         self.firstframe= True
         self.firsttime = True
-        self.location_c = [-6.8, -20,1.6,5]#[0,-20,1.6,5.0] #x-6.818,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
+        self.location_c = [0,-15,1.6,5.0] #[-6.8, -20,1.6,5]##x-6.818,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
         p_grid = np.array([[0,0]])
         for i in range(0,11):
             for j in range(0,11):
@@ -532,9 +532,9 @@ class holodeck_fly:
             pixels = state[Sensors.PRIMARY_PLAYER_CAMERA]
             orientation = state[Sensors.ORIENTATION_SENSOR]
             location = state[Sensors.LOCATION_SENSOR]
-            location = location/100
+            location = location#/100
             velocity = state[Sensors.VELOCITY_SENSOR]
-            velocity = velocity/100
+            velocity = velocity#/100
             imu = state[Sensors.IMU_SENSOR]
             self.sim_step +=1
             eulers = transforms3d.euler.mat2euler(orientation,'rxyz')
@@ -563,10 +563,11 @@ class holodeck_fly:
                     self.v_c_obstacle = self.obstacle_avoidance(olvs,orvs)
                     self.v_c_opt = self.v_c_canyon
                     if abs(self.v_c_canyon) > abs(self.v_c_obstacle):
-                        pass
+                        print (self.v_c_canyon)
                         # self.v_c_opt = self.v_c_canyon
                     else:
-                        print (self.v_c_obstacle)
+                        pass
+                        # print (self.v_c_obstacle)
                         # self.v_c_opt = self.v_c_obstacle
                     # print (self.h_c_prev)
 
