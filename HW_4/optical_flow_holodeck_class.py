@@ -20,6 +20,7 @@ import scipy.io as sio
 import transforms3d
 from common import anorm2, draw_str
 from time import clock
+from plotter import Plotter
 # import holodeck_functions
 cv2.namedWindow('lk_track')
 # determine whether the ouput should be saved
@@ -55,6 +56,8 @@ feature_params = dict( maxCorners = 500,
 class holodeck_fly:
     """docstring for holodeck_fly."""
     def __init__(self):
+        self.init_plots(5)
+
         self.track_len = 5
         self.detect_interval = 1
         self.tracks = []
@@ -109,6 +112,44 @@ class holodeck_fly:
         self.prev_gray_3 = []
         self.prev_gray_2 = []
         self.prev_gray = []
+        self.sim_step = 0
+        self.dt = 1/30.0
+
+    def init_plots(self, plotting_freq):
+        self.plotting_states = True
+        self.plotter = Plotter(plotting_freq)
+        # Define plot names
+        plots = ['Pn',                   'Pe',                    ['h', 'h_c'],
+                 ['xdot', 'xdot_c'],    ['ydot', 'ydot_c'],     'zdot',
+                 ['phi', 'phi_c'],      ['theta', 'theta_c'],   ['psi', 'psi_c'],
+                 'p',                   'q',                    ['r', 'r_c'],
+                 'ax',                  'ay',                   'az'
+                 ]
+        # Add plots to the window
+        for p in plots:
+            self.plotter.add_plot(p)
+
+        # Define state vectors for simpler input
+        self.plotter.define_state_vector("position", ['Pn', 'Pe', 'h'])
+        self.plotter.define_state_vector("velocity", ['xdot', 'ydot', 'zdot'])
+        self.plotter.define_state_vector("orientation", ['phi', 'theta', 'psi'])
+        self.plotter.define_state_vector("imu", ['ax', 'ay', 'az', 'p', 'q', 'r'])
+        self.plotter.define_state_vector("command", ['phi_c', 'theta_c', 'r_c', 'h_c'])
+        self.plotter.define_state_vector("vel_command", ['xdot_c', 'ydot_c', 'psi_c'])
+
+    def update_plots(self,command_output,command_input,eulers,location,body_vel,velocity,imu):
+        location = np.ravel(location)
+        velocity = np.ravel(velocity)
+        imu = np.ravel(imu)
+        eulers = np.ravel(eulers)
+        t = self.sim_step*self.dt
+        self.plotter.add_vector_measurement("position", [location[0],location[1],location[2]], t)
+        self.plotter.add_vector_measurement("velocity", [body_vel[0],body_vel[1],velocity[2]], t)
+        self.plotter.add_vector_measurement("orientation", eulers, t)
+        self.plotter.add_vector_measurement("imu", imu, t)
+        self.plotter.add_vector_measurement("command", [-command_output[0],command_output[1],-command_output[2],command_output[3]] , t)
+        self.plotter.add_vector_measurement("vel_command", [command_input[0], command_input[1], command_input[2]], t)
+        self.plotter.update_plots()
 
     def unwrap(self, angle):
         while angle >= np.pi:
@@ -233,12 +274,10 @@ class holodeck_fly:
         self.state_mat['pitch'].append(eulers[1])
         self.state_mat['yaw'].append(eulers[2])
 
-        location = location
-        self.state_mat['x'].append(location[0])
-        self.state_mat['y'].append(location[1])
-        self.state_mat['z'].append(location[2])
+        self.state_mat['x'].append(location[0].copy())
+        self.state_mat['y'].append(location[1].copy())
+        self.state_mat['z'].append(location[2].copy())
 
-        imu = imu
         self.state_mat['p'].append(imu[3].copy())
         self.state_mat['q'].append(imu[4].copy())
         self.state_mat['r'].append(imu[5].copy())
@@ -246,18 +285,20 @@ class holodeck_fly:
         self.state_mat['ay'].append(imu[1].copy())
         self.state_mat['az'].append(imu[2].copy())
 
-        self.state_mat['u'].append(body_vel[0])
-        self.state_mat['v'].append(body_vel[1])
-        self.state_mat['w'].append(velocity[2])
+        # self.state_mat['u'].append(body_vel[0].copy())
+        # self.state_mat['v'].append(body_vel[1].copy())
+        self.state_mat['u'].append(body_vel[0].copy())
+        self.state_mat['v'].append(body_vel[1].copy())
+        self.state_mat['w'].append(velocity[2].copy())
 
     def fetch_keys(self):
         keys = pygame.key.get_pressed()
         #Mixer that sends keys pressed to commands
         if keys[self.ALTITUDE_UP]:
-            self.altitude_c += .5
+            self.altitude_c += .1
         if keys[self.ALTITUDE_DOWN]:
             if self.altitude_c >0:
-                self.altitude_c -= .5
+                self.altitude_c -= .1
             else:
                 self.altitude_c =0
         else:
@@ -283,10 +324,114 @@ class holodeck_fly:
         if keys[self.QUIT]:
             self.running = False
         if keys[self.OPTIC]:
+            pygame.key.set_repeat(800, 800)
             self.optical +=1
         if keys[self.POSITION_COMMAND]:
             self.position_command +=1
         # return self.u_c,self.v_c,self.yaw_c,self.altitude_c,self.running
+
+    def optical_flow(self,pixels):
+        canyon_left_vel_sum = []
+        canyon_right_vel_sum = []
+        alt_vel_vel_sum = []
+        frame = pixels
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        vis = frame.copy()
+
+        if len(self.tracks) > 0:
+            img0, img1 = self.prev_gray_2, frame_gray
+            p0 = np.float32([tr[-1] for tr in self.tracks]).reshape(-1, 1, 2)
+            p1, _st, _err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
+            #find pixel velocities
+            diff = p1-p0
+            canyon_left = []
+            canyon_right = []
+            obstacle = []
+            alt_vel = []
+
+            # Find partitions for different velocities
+            for i, x in enumerate(self.p_grid):
+                if 100 < x[1] < 410 and x[0] < 185:
+                    canyon_left.append(i)
+                if 100 < x[1] < 410 and 325 < x[0] < 510:
+                    canyon_right.append(i)
+                if 140 < x[1] < 370 and 140 < x[0] < 370:
+                    obstacle.append(i)
+                if 325 < x[1] < 510 and 140 < x[0] < 370:
+                    alt_vel.append(i)
+            canyon_left = np.array([canyon_left])
+            canyon_right = np.array([canyon_right])
+            obstacle = np.array([obstacle])
+            alt_vel = np.array([alt_vel])
+
+            # Partition into different velocities
+            canyon_left_vel = []
+            for num in canyon_left[0]:
+                canyon_left_vel.append(diff[num][0])
+                # cv2.circle(vis,self.tracks[num][0],5,(0,0,255),1)
+            canyon_left_vel = np.array(canyon_left_vel)
+            canyon_right_vel = []
+            for num in canyon_right[0]:
+                canyon_right_vel.append(diff[num][0])
+            canyon_right_vel = np.array(canyon_right_vel)
+            alt_vel_vel = []
+            for num in alt_vel[0]:
+                alt_vel_vel.append(diff[num][0])
+            alt_vel_vel = np.array(alt_vel_vel)
+
+            #sum velocities in partitions
+            canyon_left_vel_sum = sum(canyon_left_vel)
+            canyon_right_vel_sum = sum(canyon_right_vel)
+            alt_vel_vel_sum = sum(alt_vel_vel)
+
+            #Plot partition velocity arrows
+            cv2.arrowedLine(vis, (92,255), (92+int(canyon_left_vel_sum[0]),255+int(canyon_left_vel_sum[1])), (0,255,0), 2) #int(20*canyon_left_vel_sum[0][0]))
+            cv2.arrowedLine(vis, (417,255), (417+int(canyon_right_vel_sum[0]),255+int(canyon_right_vel_sum[1])), (0,255,0), 2) #+int(20*canyon_right_vel_sum[0][0])
+            cv2.arrowedLine(vis, (255,417), (255+int(alt_vel_vel_sum[0]),417++int(alt_vel_vel_sum[1])), (0,0,255), 2) #+int(20*canyon_right_vel_sum[0][0])
+
+            #plot movement of the tracked grid
+            new_tracks = []
+            for tr, (x, y) in zip(self.tracks, p1.reshape(-1, 2)):
+                tr.append((x, y))
+                if len(tr) > self.track_len:
+                    del tr[0]
+                new_tracks.append(tr)
+                cv2.circle(vis, (x, y), 2, (0, 255, 0), -1)
+
+            #plot foe and search areas
+            cv2.circle(vis,(255,255),5,(0,0,255),1)
+            cv2.rectangle(vis,(0,100),(185,410), (0,255,0), 1)
+            cv2.rectangle(vis,(325,100),(510,410), (0,255,0), 1)
+            cv2.rectangle(vis,(140,140),(370,370), (255,0,0), 1)
+            cv2.rectangle(vis,(140,325),(370,510), (0,0,255), 1)
+
+            #Plot lines connecting
+            self.tracks = new_tracks
+            cv2.polylines(vis, [np.int32(tr) for tr in self.tracks], False, (0, 255, 0))
+            draw_str(vis, (20, 20), 'track count: %d' % len(self.tracks))
+
+
+        if self.frame_idx % self.detect_interval == 0 and self.frame_idx>5:
+            self.tracks = []
+            mask = np.zeros_like(frame_gray)
+            mask[:] = 255
+            for x, y in [np.int32(tr[-1]) for tr in self.tracks]:
+                cv2.circle(mask, (x, y), 5, 0, -1)
+            # p = cv2.goodFeaturesToTrack(frame_gray, mask = mask, **feature_params)
+            p = self.p_grid
+            if p is not None:
+                for x, y in np.float32(p).reshape(-1, 2):
+                    self.tracks.append([(x, y)])
+
+
+        self.frame_idx += 1
+        self.prev_gray_4 = self.prev_gray_3
+        self.prev_gray_3 = self.prev_gray_2
+        self.prev_gray_2 = self.prev_gray
+        self.prev_gray = frame_gray
+
+        cv2.imshow('lk_track', vis)
+        return canyon_left_vel_sum,canyon_right_vel_sum,alt_vel_vel_sum
 
     def run(self):
         while self.running == True :
@@ -311,11 +456,11 @@ class holodeck_fly:
             pixels = state[Sensors.PRIMARY_PLAYER_CAMERA]
             orientation = state[Sensors.ORIENTATION_SENSOR]
             location = state[Sensors.LOCATION_SENSOR]
-            location = location/100
+            location = location
             velocity = state[Sensors.VELOCITY_SENSOR]
-            velocity = velocity/100
+            velocity = velocity
             imu = state[Sensors.IMU_SENSOR]
-
+            self.sim_step +=1
             eulers = transforms3d.euler.mat2euler(orientation,'rxyz')
             rot_2d = np.array([[np.cos(eulers[2]), -np.sin(eulers[2])],
                                [np.sin(eulers[2]), np.cos(eulers[2])]])
@@ -331,97 +476,10 @@ class holodeck_fly:
             # print (location,+eulers[2])
 
             self.update_state_mat(command_output,command_input,eulers,location,body_vel,velocity,imu)
-
+            self.update_plots(command_output,command_input,eulers,location,body_vel,velocity,imu)
             if self.optical%2 == 0:
-                frame = pixels
-
-                frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                vis = frame.copy()
-
-                if len(self.tracks) > 0:
-                    img0, img1 = self.prev_gray_2, frame_gray
-                    p0 = np.float32([tr[-1] for tr in self.tracks]).reshape(-1, 1, 2)
-                    p1, _st, _err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
-                    p0r, _st, _err = cv2.calcOpticalFlowPyrLK(img1, img0, p1, None, **lk_params)
-                    d = abs(p0-p0r).reshape(-1, 2).max(-1)
-
-                    #find pixel velocities
-                    diff = p1-p0
-                    canyon_left = []
-                    canyon_right = []
-                    obstacle = []
-                    alt_vel = []
-                    for i, x in enumerate(self.p_grid):
-                        if 100 < x[0] < 410 and x[1] < 185:
-                            canyon_left.append(i)
-                        if 100 < x[0] < 410 and 325 < x[1] < 510:
-                            canyon_right.append(i)
-                        if 140 < x[0] < 370 and 140 < x[1] < 370:
-                            obstacle.append(i)
-                        if 325 < x[0] < 510 and 140 < x[1] < 370:
-                            alt_vel.append(i)
-                    canyon_left = np.array([canyon_left])
-                    canyon_right = np.array([canyon_right])
-                    obstacle = np.array([obstacle])
-                    alt_vel = np.array([alt_vel])
-                    canyon_left_vel = []
-                    for num in canyon_left:
-                        canyon_left_vel.append(diff[num][0])
-                    canyon_right_vel = []
-                    for num in canyon_right:
-                        canyon_right_vel.append(diff[num][0])
-                    alt_vel_vel = []
-                    for num in alt_vel:
-                        alt_vel_vel.append(diff[num][0])
-                    canyon_left_vel_sum = sum(canyon_left_vel)
-                    canyon_right_vel_sum = sum(canyon_right_vel)
-                    alt_vel_vel_sum = sum(alt_vel_vel)
-                    # print (canyon_left_vel_sum)
-                    # print (np.shape(canyon_left_vel_sum))
-                    cv2.arrowedLine(vis, (92,255), (92+int(20*canyon_left_vel_sum[0][0]),255), (0,255,0), 2) #int(20*canyon_left_vel_sum[0][0]))
-                    cv2.arrowedLine(vis, (417,255), (417+int(20*canyon_right_vel_sum[0][0]),255), (0,255,0), 2) #+int(20*canyon_right_vel_sum[0][0])
-
-                    # good = d < 1
-                    good = d
-                    new_tracks = []
-                    for tr, (x, y), good_flag in zip(self.tracks, p1.reshape(-1, 2), good):
-                        if not good_flag:
-                            continue
-                        tr.append((x, y))
-                        if len(tr) > self.track_len:
-                            del tr[0]
-                        new_tracks.append(tr)
-                        cv2.circle(vis, (x, y), 2, (0, 255, 0), -1)
-
-                    #plot foe and search areas
-                    cv2.circle(vis,(255,255),5,(0,0,255),1)
-                    cv2.rectangle(vis,(0,100),(185,410), (0,255,0), 1)
-                    cv2.rectangle(vis,(325,100),(510,410), (0,255,0), 1)
-                    cv2.rectangle(vis,(140,140),(370,370), (255,0,0), 1)
-                    cv2.rectangle(vis,(140,325),(370,510), (0,0,255), 1)
-                    self.tracks = new_tracks
-                    cv2.polylines(vis, [np.int32(tr) for tr in self.tracks], False, (0, 255, 0))
-                    draw_str(vis, (20, 20), 'track count: %d' % len(self.tracks))
-                if self.frame_idx % self.detect_interval == 0 and self.frame_idx>5:
-                    self.tracks = []
-                    mask = np.zeros_like(frame_gray)
-                    mask[:] = 255
-                    for x, y in [np.int32(tr[-1]) for tr in self.tracks]:
-                        cv2.circle(mask, (x, y), 5, 0, -1)
-                    # p = cv2.goodFeaturesToTrack(frame_gray, mask = mask, **feature_params)
-                    p = self.p_grid
-                    if p is not None:
-                        for x, y in np.float32(p).reshape(-1, 2):
-                            self.tracks.append([(x, y)])
-
-
-                self.frame_idx += 1
-                self.prev_gray_4 = self.prev_gray_3
-                self.prev_gray_3 = self.prev_gray_2
-                self.prev_gray_2 = self.prev_gray
-                self.prev_gray = frame_gray
-
-                cv2.imshow('lk_track', vis)
+                clvs,crvs,avvs = self.optical_flow(pixels)
+                # print (clvs
 
             if savefile == True:
                 sio.savemat(outfile,self.state_mat)
@@ -430,6 +488,7 @@ class holodeck_fly:
                 break
 
 def main():
+
     fly = holodeck_fly
     cv2.destroyAllWindows()
 

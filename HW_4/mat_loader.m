@@ -21,6 +21,7 @@ subplot(5,3,3)
 plot (t,alt_c,'b')
 hold on
 plot (t,z,'r')
+
 title('Altitude')
 legend ('Commanded','Actual')
 
