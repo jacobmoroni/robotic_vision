@@ -21,6 +21,7 @@ import transforms3d
 from common import anorm2, draw_str
 from time import clock
 from plotter import Plotter
+from PID import PID
 # import holodeck_functions
 cv2.namedWindow('lk_track')
 # determine whether the ouput should be saved
@@ -107,7 +108,7 @@ class holodeck_fly:
 
         self.firstframe= True
         self.firsttime = True
-        self.location_c = [0,-15,1.6,5.0] #[-6.8, -20,1.6,5]##x-6.818,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
+        self.location_c = [-1,-15,1.6,5.0] #[-6.8, -20,1.6,5]##x-6.818,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
         p_grid = np.array([[0,0]])
         for i in range(0,11):
             for j in range(0,11):
@@ -128,6 +129,7 @@ class holodeck_fly:
         self.v_c_obstacle = 0
         self.collision_counter = 0
         self.time_to_collision = 10
+        self.f_pixel = 256
 
     def init_plots(self, plotting_freq):
         self.plotting_states = True
@@ -214,6 +216,7 @@ class holodeck_fly:
         k_d_phi = .1
         k_d_theta = .1
         k_d_yaw = .5
+        k_i_theta = 2
         u = body_velocity[0]
         v = body_velocity[1]
         yaw = eulers[2]
@@ -226,7 +229,7 @@ class holodeck_fly:
         self.yaw_c = self.unwrap(self.yaw_c)
         yaw_diff = self.unwrap(yaw_diff)
         yaw_rate_c = k_p_yaw*(yaw_diff) + k_d_yaw*(r)
-        theta_c = -k_p_theta*(self.u_c-u) + k_d_theta*(r)
+        theta_c = -k_p_theta*(self.u_c-u) + k_d_theta*(r)+k_i_theta*(self.u_c-u)*(1/30)
         phi_c = self.saturate(phi_c,.3,-.3)
         theta_c = self.saturate(theta_c,.3,-.3)
         vel_command = np.array([phi_c,theta_c,yaw_rate_c,h_c])
@@ -371,7 +374,7 @@ class holodeck_fly:
             draw_str(vis, (255,20), 'Position Command')
         if self.optical_command >2:
             draw_str(vis, (255,20), 'Canyon Following')
-            if self.time_to_collision < 10**10:
+            if self.collision_counter <6 and self.time_to_collision < 10**10:
                 draw_str(vis, (20, 20), 'Time to Collision: %d' % self.time_to_collision)
             else:
                 draw_str(vis, (20, 20), 'Stopping Now')
@@ -383,6 +386,7 @@ class holodeck_fly:
             p1, _st, _err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
             #find pixel velocities
             diff = p1-p0
+            # diff = self.negate_yaw(diff)
             canyon_left = []
             canyon_right = []
             obstacle_left = []
@@ -444,12 +448,11 @@ class holodeck_fly:
             collision_time = []
             for num in collision[0]:
                 dist = ((self.p_grid[num][0]-255)**2 + ((self.p_grid[num][1]-255)**2))**(1/2)
-                # print (dist)
                 collision_vel = (diff[num][0][0]**2 + diff[num][0][1]**2)**(1/2)*30
                 collision_time.append(dist/collision_vel)
                 cv2.circle(vis,self.tracks[num][0],5,(0,0,255),1)
             collision_time = np.array(collision_time)
-            # print (collision_time)
+
 
             #sum velocities in partitions
             canyon_left_vel_sum = sum(canyon_left_vel)
@@ -458,7 +461,7 @@ class holodeck_fly:
             obstacle_left_vel_sum = sum(obstacle_left_vel)
             obstacle_right_vel_sum = sum(obstacle_right_vel)
             self.time_to_collision = np.mean(collision_time)
-            # print (self.time_to_collision)
+
             #Plot partition velocity arrows
             cv2.arrowedLine(vis, (92,255), (92+int(canyon_left_vel_sum[0]),255+int(canyon_left_vel_sum[1])), (0,255,0), 2)
             cv2.arrowedLine(vis, (417,255), (417+int(canyon_right_vel_sum[0]),255+int(canyon_right_vel_sum[1])), (0,255,0), 2)
@@ -510,23 +513,26 @@ class holodeck_fly:
         return canyon_left_vel_sum,canyon_right_vel_sum,alt_vel_vel_sum,obstacle_left_vel_sum,obstacle_right_vel_sum
 
     def canyon_follow_command(self,clvs,crvs):
-        k_canyon = 2
+        k_canyon = 1.5
         v_c = k_canyon*(clvs[0]+crvs[0])/(clvs[0]-crvs[0])
         return v_c
 
     def alt_vel_command(self,avvs,body_vel,location, h_c_prev):
         hdot = 4.4/5 - 100/avvs[1]
-        # print (hdot)
+
         h_c = h_c_prev+1/30*hdot
         # h_error = abs(h_c - location[2])
         h_c = self.saturate(h_c,location[2]+1,location[2]-1)
         return h_c
 
     def obstacle_avoidance(self,olvs,orvs):
-        k_obs = 1
-        v_c = k_obs*(olvs[0]+orvs[0])/(abs(olvs[0])+abs(orvs[0]))
-        return v_c
+        k_obs = .1
+        yaw_c = k_obs*(olvs[0]+orvs[0])/(abs(olvs[0])+abs(orvs[0]))
+        return yaw_c
 
+    # def negate_yaw(self,diff):
+
+    #     return diff
     def run(self):
         while self.running == True :
             pygame.event.pump() #this clears events to make sure fresh ones come in
@@ -538,6 +544,10 @@ class holodeck_fly:
                 self.altitude_c = h_c
             elif self.optical_command > 2:
                 self.yaw_c_opt = self.yaw_c
+                # if abs(self.yaw_c_obstacle) > .01 and  abs(self.yaw_c_obstacle) < .1:
+                #     self.yaw_c_opt = self.yaw_c + self.yaw_c_obstacle
+                # else:
+                #     self.yaw_c_opt = self.location_c[2]
                 self.h_c_opt = self.h_c_prev
                 command_input = np.array([self.u_c_opt,self.v_c_opt,self.yaw_c_opt,self.h_c_opt])
             else:
@@ -553,17 +563,18 @@ class holodeck_fly:
             pixels = state[Sensors.PRIMARY_PLAYER_CAMERA]
             orientation = state[Sensors.ORIENTATION_SENSOR]
             location = state[Sensors.LOCATION_SENSOR]
-            location = location/100
+            location = location#/100
             velocity = state[Sensors.VELOCITY_SENSOR]
-            velocity = velocity/100
+            velocity = velocity#/100
             imu = state[Sensors.IMU_SENSOR]
+            self.r = imu[5]
             self.sim_step +=1
             eulers = transforms3d.euler.mat2euler(orientation,'rxyz')
             rot_2d = np.array([[np.cos(eulers[2]), -np.sin(eulers[2])],
                                [np.sin(eulers[2]), np.cos(eulers[2])]])
             planar_vel = np.array([velocity[0],velocity[1]])
             body_vel= np.matmul(rot_2d,planar_vel)
-            # body_vel= body_vel/100
+            self.u = body_vel[0]
             angle_command = self.controller(command_input,body_vel,eulers,imu)
             roll_c = float(angle_command[0])
             pitch_c = float(angle_command[1])
@@ -577,30 +588,23 @@ class holodeck_fly:
             if self.optical > 2:
                 clvs,crvs,avvs,olvs,orvs = self.optical_flow(pixels)
                 if self.optical_command >2:
+                    if self.u > 4.1:
+                        if self.time_to_collision > 10**10 or self.time_to_collision < 1.6:     # or self.time_to_collision < 1:
+                            self.collision_counter += 1
+                            print (self.collision_counter)
+                    if self.collision_counter > 5:
+                        self.u_c_opt = 0
+                        self.v_c_opt = 0
+                        self.h_c_prev = 0
+                        self.yaw_c_obstacle = self.yaw_c
+                    if self.collision_counter <5:
+                        self.u_c_opt  = 5.0
+                        self.v_c_canyon = self.canyon_follow_command(clvs,crvs)
+                        self.h_c_prev = self.alt_vel_command(avvs,body_vel,location, self.h_c_prev)
+                        self.yaw_c_obstacle = self.obstacle_avoidance(olvs,orvs)
+                        # print (self.yaw_c_obstacle)
+                        self.v_c_opt = self.v_c_canyon
 
-                    if self.time_to_collision > 10**10:     # or self.time_to_collision < 1:
-                        self.collision_counter += 1
-                        # print ("col")
-                        # print (self.collision_counter)
-                        if self.collision_counter > 2:
-                            self.u_c_opt = 0
-                    else:
-                        if self.collision_counter <2:
-                            self.u_c_opt  = 5
-
-                    self.v_c_canyon = self.canyon_follow_command(clvs,crvs)
-                    self.h_c_prev = self.alt_vel_command(avvs,body_vel,location, self.h_c_prev)
-                    self.v_c_obstacle = self.obstacle_avoidance(olvs,orvs)
-                    self.v_c_opt = self.v_c_canyon
-                    if abs(self.v_c_canyon) > abs(self.v_c_obstacle):
-                        pass
-                        # print (self.v_c_canyon)
-                        # self.v_c_opt = self.v_c_canyon
-                    else:
-                        pass
-                        # print (self.v_c_obstacle)
-                        # self.v_c_opt = self.v_c_obstacle
-                    # print (self.h_c_prev)
 
 
             if savefile == True:
