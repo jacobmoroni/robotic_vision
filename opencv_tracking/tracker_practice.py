@@ -1,34 +1,32 @@
 import cv2
 import sys
 
-# (major_ver, minor_ver, subminor_ver) = (cv2.__version__).split('.')￼
-
 if __name__ == '__main__' :
 
     # Set up tracker.
     # Instead of MIL, you can also use
 
     tracker_types = ['BOOSTING', 'MIL','KCF', 'TLD', 'MEDIANFLOW', 'GOTURN']
-    tracker_type = tracker_types[2]
+    tracker_type = tracker_types[0]
 
-    if int(minor_ver) < 3:
-        tracker = cv2.Tracker_create(tracker_type)
-    else:
-        if tracker_type == 'BOOSTING':
-            tracker = cv2.TrackerBoosting_create()
-        if tracker_type == 'MIL':
-            tracker = cv2.TrackerMIL_create()
-        if tracker_type == 'KCF':
-            tracker = cv2.TrackerKCF_create()
-        if tracker_type == 'TLD':
-            tracker = cv2.TrackerTLD_create()
-        if tracker_type == 'MEDIANFLOW':
-            tracker = cv2.TrackerMedianFlow_create()
-        if tracker_type == 'GOTURN':
-            tracker = cv2.TrackerGOTURN_create()
+    # if int(minor_ver) < 3:
+    #     tracker = cv2.Tracker_create(tracker_type)
+    # else:
+    if tracker_type == 'BOOSTING':
+        tracker = cv2.TrackerBoosting_create()
+    if tracker_type == 'MIL':
+        tracker = cv2.TrackerMIL_create()
+    if tracker_type == 'KCF':
+        tracker = cv2.TrackerKCF_create()
+    if tracker_type == 'TLD':
+        tracker = cv2.TrackerTLD_create()
+    if tracker_type == 'MEDIANFLOW':
+        tracker = cv2.TrackerMedianFlow_create()
+    if tracker_type == 'GOTURN':
+        tracker = cv2.TrackerGOTURN_create()
 
     # Read video
-    video = cv2.VideoCapture("videos/chaplin.mp4")
+    video = cv2.VideoCapture('mv2_001.avi')
 
     # Exit if video not opened.
     if not video.isOpened():

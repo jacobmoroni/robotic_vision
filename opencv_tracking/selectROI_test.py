@@ -1,6 +1,13 @@
 import numpy as np
 import cv2
 
+lk_params = dict( winSize  = (15, 15),
+                  maxLevel = 2,
+                  criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+feature_params = dict( maxCorners = 500,
+                       qualityLevel = 0.3,
+                       minDistance = 7,
+                       blockSize = 7 )
 if __name__ == '__main__' :
 
     # Read image
@@ -8,23 +15,30 @@ if __name__ == '__main__' :
 
     # Select ROI
     r = cv2.selectROI(im)
-
+    mask = np.zeros_like(im)
+    mask[int(r[1]):int(r[1]+r[3]), int(r[0]):int(r[0]+r[2]),:] = 255
+    print mask
+    p = cv2.goodFeaturesToTrack(im, mask = mask, **feature_params)
+    print (p)
     # Crop image
-    imCrop = im[int(r[1]):int(r[1]+r[3]), int(r[0]):int(r[0]+r[2])]
+    # imCrop = im[int(r[1]):int(r[1]+r[3]), int(r[0]):int(r[0]+r[2])]
 
     # Display cropped image
-    cv2.imshow("Image", imCrop)
-    cv2.waitKey(0)
+    # cv2.imshow("Image", imCrop)
+    # cv2.waitKey(0)
 
-# cap = cv2.VideoCapture(1)
-#
+# cap = cv2.VideoCapture('mv2_001.avi')
+# # Define an initial bounding box
+# bbox = (287, 23, 86, 320)
+# ret, frame = cap.read()
+# # Uncomment the line below to select a different bounding box
+# bbox = cv2.selectROI(frame, False)
 # ## this section was used for viewing image in greyscale
 # while(True):
 #     # Capture frame-by-frame
 #     ret, frame = cap.read()
 #
 #     # Select ROI
-#     image = cv2.imread(frame)
 #     r = cv2.selectROI(image)
 #
 #     # Crop image
