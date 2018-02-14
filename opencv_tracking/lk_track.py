@@ -45,25 +45,30 @@ class App:
         self.tracks = []
         # self.cam = video.create_capture(video_src)
         self.frame_idx = 0
-        self.cam = cv2.VideoCapture('mv2_001.avi')
+        self.cam = cv2.VideoCapture('mouse_tracking.mp4')
+
+    def selector(self):
         ret,frame = self.cam.read()
         self.r = cv2.selectROI(frame,False)
         # print (self.track_box)
 
     def run(self):
+        self.selector()
         while True:
             _ret, frame = self.cam.read()
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             vis = frame.copy()
-
+            if cv2.waitKey(1) & 0xFF == ord('p'):#Pause
+                self.selector()
+                # print ("it works")
             if len(self.tracks) > 0:
                 img0, img1 = self.prev_gray, frame_gray
                 p0 = np.float32([tr[-1] for tr in self.tracks]).reshape(-1, 1, 2)
                 p1, _st, _err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
                 p0r, _st, _err = cv2.calcOpticalFlowPyrLK(img1, img0, p1, None, **lk_params)
                 diff = p1-p0
-                moving1 = diff[:,0,0] > .1
-                moving2 = diff[:,0,1] > .1
+                moving1 = diff[:,0,0] > .2
+                moving2 = diff[:,0,1] > .2
                 moving = np.logical_or(moving1,moving2)
                 d = abs(p0-p0r).reshape(-1, 2).max(-1)
                 good = d < 1
@@ -71,6 +76,8 @@ class App:
                 new_tracks = []
                 usum = 0
                 vsum = 0
+                umax = 0
+                vmax = 0
                 num_tracks = 0
                 for tr, (x, y), (u,v), good_flag in zip(self.tracks, p1.reshape(-1, 2), diff.reshape(-1,2),good):
                     if not good_flag:
@@ -80,6 +87,10 @@ class App:
                     if len(tr) > self.track_len:
                         del tr[0]
                     new_tracks.append(tr)
+                    if u > umax:
+                        umax = u
+                    if v > vmax:
+                        vmax = v
                     usum+=u
                     vsum+=v
                     cv2.circle(vis, (x, y), 2, (0, 255, 0), -1)
@@ -95,6 +106,11 @@ class App:
                 rtemp3 = self.r[3]
                 rtemp0 = self.r[0]+umean
                 rtemp2 = self.r[2]
+
+                # rtemp1 = self.r[1]+vmax
+                # rtemp3 = self.r[3]
+                # rtemp0 = self.r[0]+umax
+                # rtemp2 = self.r[2]
                 # print (self.r)
                 self.r = (np.rint(rtemp0),np.rint(rtemp1),np.rint(rtemp2),np.rint(rtemp3))
                 cv2.rectangle(vis,(int(self.r[0]),int(self.r[1])), (int(self.r[0])+int(self.r[2]),int(self.r[1])+int(self.r[3])), (0,0,255), 2)
