@@ -1,33 +1,19 @@
-#!/usr/bin/env python
-'''
-Lucas-Kanade tracker
-====================
-Lucas-Kanade sparse optical flow demo. Uses goodFeaturesToTrack
-for track initialization and back-tracking for match verification
-between frames.
-Usage
------
-lk_track.py [<video_source>]
-Keys
-----
-ESC - exit
-'''
-
-# from __future__ import print_function
 #this removes python2.7 paths so it wont screw everything up with python3
 import sys
-dir_remove = []
-for p in sys.path:
-    if p.find('python2') !=-1:
-        dir_remove.append(p)
-for p in dir_remove:
-    sys.path.remove(p)
+# dir_remove = []
+# for p in sys.path:
+#     if p.find('python2') !=-1:
+#         dir_remove.append(p)
+# for p in dir_remove:
+#     sys.path.remove(p)
 
 import numpy as np
 import cv2
 # import video
 from common import anorm2, draw_str
 from time import clock
+from kalman2d import Kalman2D
+from IPython.core.debugger import set_trace
 
 lk_params = dict( winSize  = (15, 15),
                   maxLevel = 2,
@@ -45,13 +31,16 @@ class App:
         self.tracks = []
         # self.cam = video.create_capture(video_src)
         self.frame_idx = 0
+        self.kf = Kalman2D()
+        self.firsttime = True
         # self.cam = cv2.VideoCapture('mouse_tracking.mp4')
-        # self.cam = cv2.VideoCapture('mv2_001.avi')
-        self.cam = cv2.VideoCapture('singleball.mov')
+        self.cam = cv2.VideoCapture('videos/mv2_001.avi')
+        # self.cam = cv2.VideoCapture('singleball.mov')
 
     def selector(self):
         ret,frame = self.cam.read()
         self.r = cv2.selectROI(frame,False)
+        self.prediction = np.reshape(np.array([[self.r[1]],[self.r[0]],[10],[10]],np.float32),4,1)
         # print (self.track_box)
 
     def run(self):
@@ -102,13 +91,32 @@ class App:
                 else:
                     umean = 0
                     vmean = 0
-                # print (umean)
 
                 rtemp1 = self.r[1]+vmean
                 rtemp3 = self.r[3]
                 rtemp0 = self.r[0]+umean
                 rtemp2 = self.r[2]
+                xdot = vmean/30
+                ydot = umean/30
 
+                self.kf.measurement(rtemp1,rtemp0,xdot,ydot)
+                self.kf.kalman.correct(self.kf.move)
+                if self.firsttime == True:
+
+                    while self.prediction[2] > .03 or abs(self.prediction[0]-self.r[1]) > 1:
+                        self.kf.kalman.correct(self.kf.move)
+                        self.prediction = self.kf.kalman.predict()
+                        # print abs(self.prediction[0]-self.r[1])
+                        # print self.prediction[2]
+                    self.firsttime = False
+                else:
+                    self.prediction = self.kf.kalman.predict()
+                    # self.prediciton = self.kf.kalman.correct(self.kf.move)
+
+                self.kf.pred.append((int(self.prediction[0]),int(self.prediction[1])))
+                # self.kf.paint(vis)
+                rtemp1 = float(self.prediction[0])
+                rtemp0 = float(self.prediction[1])
                 # rtemp1 = self.r[1]+vmax
                 # rtemp3 = self.r[3]
                 # rtemp0 = self.r[0]+umax
@@ -141,14 +149,8 @@ class App:
                 break
 
 def main():
-    import sys
-    try:
-        video_src = sys.argv[1]
-    except:
-        video_src = 0
-
-    print(__doc__)
-    App(video_src).run()
+    # kf = Kalman2D()
+    App(0).run()
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':

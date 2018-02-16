@@ -45,8 +45,12 @@ pygame.display.set_caption("Holodeck")
 clock = pygame.time.Clock()
 pygame.font.init()
 
-lk_params = dict( winSize  = (15, 15),
-                  maxLevel = 2,
+# lk_params = dict( winSize  = (15, 15),
+#                   maxLevel = 2,
+#                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
+lk_params = dict( winSize  = (200, 200),
+                  maxLevel = 6,
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
 feature_params = dict( maxCorners = 500,
