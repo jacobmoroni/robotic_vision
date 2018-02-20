@@ -45,6 +45,7 @@ class App:
 
     def run(self):
         self.selector()
+
         while True:
             _ret, frame = self.cam.read()
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -54,6 +55,9 @@ class App:
                 # print ("it works")
             if len(self.tracks) > 0:
                 img0, img1 = self.prev_gray, frame_gray
+                b_sub = cv2.absdiff(img0,img1)
+                
+                cv2.imshow('BackSub',b_sub)
                 p0 = np.float32([tr[-1] for tr in self.tracks]).reshape(-1, 1, 2)
                 p1, _st, _err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
                 p0r, _st, _err = cv2.calcOpticalFlowPyrLK(img1, img0, p1, None, **lk_params)

@@ -1,8 +1,8 @@
 import numpy as np
 import cv2
-from IPython.core.debugger import set_trace
+from pdb import set_trace
 
-cap = cv2.VideoCapture('videos/mv2_001.avi')
+cap = cv2.VideoCapture(0)
 # take first frame of the video
 ret,frame = cap.read()
 # setup initial location of window
