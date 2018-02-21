@@ -45,24 +45,35 @@ class App:
 
     def run(self):
         self.selector()
-
+        self.b_sub = []
+        _ret, frame0 = self.cam.read()
+        frame_gray0 = cv2.cvtColor(frame0, cv2.COLOR_BGR2GRAY)
+        _ret, frame1 = self.cam.read()
+        self.prev_gray = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        img0,img1 = frame_gray0,self.prev_gray
         while True:
             _ret, frame = self.cam.read()
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            self.b_sub = cv2.absdiff(img0,img1)
+            ret1,self.b_sub = cv2.threshold(self.b_sub,50,255,cv2.THRESH_BINARY)
+            self.b_sub = cv2.erode(self.b_sub,(3,3),iterations = 1)
+            self.b_sub = cv2.dilate(self.b_sub,(3,3),iterations = 2)
+            img0, img1 = self.prev_gray, frame_gray
+            cv2.imshow('BackSub',self.b_sub)
             vis = frame.copy()
             if cv2.waitKey(1) & 0xFF == ord('p'):#Pause
                 self.selector()
-                # print ("it works")
             if len(self.tracks) > 0:
-                img0, img1 = self.prev_gray, frame_gray
-                b_sub = cv2.absdiff(img0,img1)
-                
-                cv2.imshow('BackSub',b_sub)
+                # img0, img1 = self.prev_gray, frame_gray
+                # self.b_sub = cv2.absdiff(img0,img1)
+                # ret1,self.b_sub = cv2.threshold(self.b_sub,50,255,cv2.THRESH_BINARY)
+                # print self.b_sub
+                # cv2.imshow('BackSub',self.b_sub)
                 p0 = np.float32([tr[-1] for tr in self.tracks]).reshape(-1, 1, 2)
                 p1, _st, _err = cv2.calcOpticalFlowPyrLK(img0, img1, p0, None, **lk_params)
                 p0r, _st, _err = cv2.calcOpticalFlowPyrLK(img1, img0, p1, None, **lk_params)
                 diff = p1-p0
-                moving1 = diff[:,0,0] > .2
+                moving1 = diff[:,0,0] > .25
                 moving2 = diff[:,0,1] > .2
                 moving = np.logical_or(moving1,moving2)
                 d = abs(p0-p0r).reshape(-1, 2).max(-1)
@@ -134,8 +145,15 @@ class App:
 
             if self.frame_idx % self.detect_interval == 0:
                 p_new = []
+                if self.b_sub == []:
+                    self.b_sub = np.zeros_like(frame_gray)
+                    self.b_sub[:,:] = 255
+                    # print self.b_sub
                 mask = np.zeros_like(frame_gray)
                 mask[int(self.r[1]):int(self.r[1]+self.r[3]), int(self.r[0]):int(self.r[0]+self.r[2])] = 255
+                mask = np.logical_and(mask, self.b_sub).astype(np.uint8)*255
+
+
                 for x, y in [np.int32(tr[-1]) for tr in self.tracks]:
                     cv2.circle(mask, (x, y), 5, 0, -1)
                 p = cv2.goodFeaturesToTrack(frame_gray, mask = mask, **feature_params)
