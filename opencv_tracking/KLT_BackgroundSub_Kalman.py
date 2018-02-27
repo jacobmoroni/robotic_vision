@@ -35,6 +35,8 @@ class App:
         self.firsttime = True
         # self.cam = cv2.VideoCapture('mouse_tracking.mp4')
         self.cam = cv2.VideoCapture('videos/mv2_001.avi')
+        self.fgbg = cv2.createBackgroundSubtractorMOG2(detectShadows = False)
+
         # self.cam = cv2.VideoCapture(0)
 
     def selector(self):
@@ -54,10 +56,11 @@ class App:
         while True:
             _ret, frame = self.cam.read()
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            self.b_sub = cv2.absdiff(img0,img1)
-            ret1,self.b_sub = cv2.threshold(self.b_sub,50,255,cv2.THRESH_BINARY)
-            self.b_sub = cv2.erode(self.b_sub,(3,3),iterations = 1)
-            self.b_sub = cv2.dilate(self.b_sub,(3,3),iterations = 2)
+            self.b_sub = self.fgbg.apply(frame)
+            # self.b_sub = cv2.absdiff(img0,img1)
+            # ret1,self.b_sub = cv2.threshold(self.b_sub,50,255,cv2.THRESH_BINARY)
+            self.b_sub = cv2.erode(self.b_sub,(3,3),iterations = 5)
+            self.b_sub = cv2.dilate(self.b_sub,(3,3),iterations = 3)
             img0, img1 = self.prev_gray, frame_gray
             cv2.imshow('BackSub',self.b_sub)
             vis = frame.copy()
