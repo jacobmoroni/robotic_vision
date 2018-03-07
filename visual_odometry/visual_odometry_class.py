@@ -1,10 +1,12 @@
 import numpy as np
 import cv2
+from pdb import set_trace
+import transforms3d
 
 STAGE_FIRST_FRAME = 0
 STAGE_SECOND_FRAME = 1
 STAGE_DEFAULT_FRAME = 2
-kMinNumFeature = 1500
+kMinNumFeature = 500
 
 lk_params = dict(winSize = (21,21),
                     # maxLevel = 3
@@ -31,7 +33,7 @@ class PinholeCamera:
         self.d = [k1,k2,p1,p2,k3]
 
 class VisualOdometry:
-    def __init__(self,cam,annotations):
+    def __init__(self,cam):
         self.frame_stage = 0
         self.cam = cam
         self.new_frame = None
@@ -44,20 +46,21 @@ class VisualOdometry:
         self.pp = (cam.cx,cam.cy)
         self.trueX, self.trueY, self.trueZ = 0,0,0
         self.detector = cv2.FastFeatureDetector_create(threshold = 25, nonmaxSuppression = True)
-        with open(annotations) as f:
-            self.annotations = f.readlines()
+        # self.annotations = state_data
 
-    def getAbsoluteScale(self, frame_id):
-        ss = self.annotations[frame_id-1].strip().split()
-        x_prev = float(ss[3])
-        y_prev = float(ss[7])
-        z_prev = float(ss[11])
-        ss = self.annotations[frame_id].strip().split()
-        x = float(ss[3])
-        y = float(ss[7])
-        z = float(ss[11])
+    def getAbsoluteScale(self, positions):
+        # ss = self.annotations[frame_id-1].strip().split()
+        # print (positions)
+        x_prev = float(positions[0][0][0])
+        y_prev = float(positions[1][0][0])
+        z_prev = float(positions[2][0][0])
+        # ss = self.annotations[frame_id].strip().split()
+        x = float(positions[0][0][1])
+        y = float(positions[1][0][1])
+        z = float(positions[2][0][1])
         self.trueX,self.trueY,self.trueZ = x,y,z
         return np.sqrt((x-x_prev)*(x-x_prev) + (y-y_prev)*(y-y_prev) + (z-z_prev)*(z-z_prev))
+        # return 1
 
     def processFirstFrame(self):
         self.px_ref = self.detector.detect(self.new_frame)
@@ -71,12 +74,24 @@ class VisualOdometry:
         self.frame_stage = STAGE_DEFAULT_FRAME
         self.px_ref = self.px_cur
 
-    def processFrame(self, frame_id):
+    def processFrame(self, positions):
         self.px_ref,self.px_cur = featureTracking(self.last_frame,self.new_frame,self.px_ref)
         E,mask = cv2.findEssentialMat(self.px_cur,self.px_ref, focal = self.focal, pp=self.pp,method=cv2.RANSAC,prob=0.999,threshold=1.0)
-        _,R,t,mask = cv2.recoverPose(E,self.px_cur,self.px_ref,focal=self.focal,pp = self.pp)
-        absolute_scale = self.getAbsoluteScale(frame_id)
-        if(absolute_scale > 0.1):
+        R1,R2,_ = cv2.decomposeEssentialMat(E)
+        if np.trace(R1)>2.5:
+            R_des = R1
+        elif np.trace(R2)>2.5:
+            R_des = R2
+        else:
+            print ("both are crappy")
+            R_des = np.array([[1,0,0],[0,1,0],[0,0,1]])
+        R = R_des
+        # print (R1)
+        _,_,t,mask = cv2.recoverPose(E,self.px_cur,self.px_ref,focal=self.focal,pp = self.pp)
+        # eulers = transforms3d.euler.mat2euler(R,'rxyz')
+        # print (eulers[0])
+        absolute_scale = self.getAbsoluteScale(positions)
+        if(absolute_scale > 0.01):
             self.cur_t = self.cur_t + absolute_scale*self.cur_R.dot(t)
             self.cur_R = R.dot(self.cur_R)
         if(self.px_ref.shape[0] < kMinNumFeature):
@@ -84,13 +99,14 @@ class VisualOdometry:
             self.px_cur = np.array([x.pt for x in self.px_cur], dtype=np.float32)
         self.px_ref = self.px_cur
 
-    def update(self,img,frame_id):
+    def update(self,img,positions):
         assert(img.ndim==2 and img.shape[0]==self.cam.height and img.shape[1]==self.cam.width), "Frame: Provided image isn't the same size as camera model or is not grayscale"
         self.new_frame = img
         if (self.frame_stage == STAGE_DEFAULT_FRAME):
-            self.processFrame(frame_id)
+            self.processFrame(positions)
         elif (self.frame_stage == STAGE_SECOND_FRAME):
             self.processSecondFrame()
         elif (self.frame_stage == STAGE_FIRST_FRAME):
             self.processFirstFrame()
         self.last_frame = self.new_frame
+        return self.px_ref
