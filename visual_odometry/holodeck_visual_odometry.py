@@ -21,7 +21,9 @@ import transforms3d
 from common import anorm2, draw_str
 from time import clock
 from plotter import Plotter
-# from PID import PID
+from visual_odometry_class import PinholeCamera, VisualOdometry
+
+
 # import holodeck_functions
 cv2.namedWindow('lk_track')
 # determine whether the ouput should be saved
@@ -31,6 +33,14 @@ if len(sys.argv) ==2:
 else:
     savefile = False
 
+#visual odometry setup
+state_data = []
+cam = PinholeCamera(512.0, 512.0, 512.0, 512.0, 256.5, 256.5)
+vo = VisualOdometry(cam)
+
+traj = np.zeros((600,600,3),dtype=np.uint8)
+
+#pygame setup
 display_width = 400
 display_height = 100
 black = (0,0,0)
@@ -76,6 +86,7 @@ class holodeck_fly:
 
         #start Holodeck
         self.env = Holodeck.make("UrbanCity")
+        # self.env = Holodeck.make("EuropeanForest")
 
         self.state_mat = {'x_c':[],'y_c':[],'u_c':[],'v_c':[],'yaw_c':[],
                      'roll_c':[],'pitch_c':[],'yaw_rate_c':[],'alt_c':[],
@@ -92,6 +103,7 @@ class holodeck_fly:
         self.optical = 1
         self.position_command = 1
         self.optical_command = 1
+        self.vis_odom_flag = 0
 
         self.ALTITUDE_UP = K_w
         self.ALTITUDE_DOWN = K_s
@@ -109,9 +121,12 @@ class holodeck_fly:
         self.OPTIC_COMMAND_CANCEL = K_4
         self.RESET = K_r
         self.QUIT = K_ESCAPE
+        self.VIS_ODOM = K_v
+        self.VIS_ODOM_OFF = K_b
 
         self.firstframe= True
         self.firsttime = True
+        self.img_id = 1
         self.location_c = [-1,-15,1.6,5.0] #[-6.8, -20,1.6,5]##x-6.818,y -11.455,psi 1.6,h        # super(holodeck_fly, self).__init__()
         p_grid = np.array([[0,0]])
         for i in range(0,11):
@@ -120,7 +135,7 @@ class holodeck_fly:
                 p_grid = np.concatenate((p_grid,p_new))
         self.p_grid = p_grid[1:p_grid.shape[0]+1]
 
-        # self.prev_gray_4 = []
+        self.prev_gray_4 = []
         self.prev_gray_3 = []
         self.prev_gray_2 = []
         self.prev_gray = []
@@ -285,35 +300,36 @@ class holodeck_fly:
         return state
 
     def update_state_mat(self, command_output,command_input,eulers,location,body_vel,velocity,imu):
-        self.state_mat['x_c'].append(self.location_c[0])
-        self.state_mat['y_c'].append(self.location_c[1])
+        self.state_mat['x_c'].append(float(self.location_c[0]))
+        self.state_mat['y_c'].append(float(self.location_c[1]))
 
-        self.state_mat['u_c'].append(command_input[0])
-        self.state_mat['v_c'].append(command_input[1])
-        self.state_mat['yaw_c'].append(command_input[2])
-        self.state_mat['roll_c'].append(command_output[0])
-        self.state_mat['pitch_c'].append(command_output[1])
-        self.state_mat['yaw_rate_c'].append(command_output[2])
-        self.state_mat['alt_c'].append(command_output[3])
+        self.state_mat['u_c'].append(float(command_input[0]))
+        self.state_mat['v_c'].append(float(command_input[1]))
+        self.state_mat['yaw_c'].append(float(command_input[2]))
+        self.state_mat['roll_c'].append(float(command_output[0]))
+        self.state_mat['pitch_c'].append(float(command_output[1]))
+        self.state_mat['yaw_rate_c'].append(float(command_output[2]))
+        self.state_mat['alt_c'].append(float(command_output[3]))
 
-        self.state_mat['roll'].append(eulers[0])
-        self.state_mat['pitch'].append(eulers[1])
-        self.state_mat['yaw'].append(eulers[2])
+        self.state_mat['roll'].append(float(eulers[0]))
+        self.state_mat['pitch'].append(float(eulers[1]))
+        self.state_mat['yaw'].append(float(eulers[2]))
 
-        self.state_mat['x'].append(location[0].copy())
-        self.state_mat['y'].append(location[1].copy())
-        self.state_mat['z'].append(location[2].copy())
+        self.state_mat['x'].append(float(location[0].copy()))
+        self.state_mat['y'].append(float(location[1].copy()))
+        self.state_mat['z'].append(float(location[2].copy()))
 
-        self.state_mat['p'].append(imu[3].copy())
-        self.state_mat['q'].append(imu[4].copy())
-        self.state_mat['r'].append(imu[5].copy())
-        self.state_mat['ax'].append(imu[0].copy())
-        self.state_mat['ay'].append(imu[1].copy())
-        self.state_mat['az'].append(imu[2].copy())
+        self.state_mat['p'].append(float(imu[3].copy()))
+        self.state_mat['q'].append(float(imu[4].copy()))
+        self.state_mat['r'].append(float(imu[5].copy()))
+        self.state_mat['ax'].append(float(imu[0].copy()))
+        self.state_mat['ay'].append(float(imu[1].copy()))
+        self.state_mat['az'].append(float(imu[2].copy()))
 
-        self.state_mat['u'].append(body_vel[0].copy())
-        self.state_mat['v'].append(body_vel[1].copy())
-        self.state_mat['w'].append(velocity[2].copy())
+        self.state_mat['u'].append(float(body_vel[0].copy()))
+        self.state_mat['v'].append(float(body_vel[1].copy()))
+        self.state_mat['w'].append(float(velocity[2].copy()))
+        return self.state_mat
 
     def fetch_keys(self):
         keys = pygame.key.get_pressed()
@@ -362,6 +378,10 @@ class holodeck_fly:
             self.optical_command += 1
         if keys[self.OPTIC_COMMAND_CANCEL]:
             self.optical_command -= 1
+        if keys[self.VIS_ODOM]:
+            self.vis_odom_flag = 1
+        if keys[self.VIS_ODOM_OFF]:
+            self.vis_odom_flag = 0
         # return self.u_c,self.v_c,self.yaw_c,self.altitude_c,self.running
 
     def optical_flow(self,pixels):
@@ -586,7 +606,17 @@ class holodeck_fly:
             h_c = float(angle_command[3])
             command_output = np.array([roll_c,pitch_c, yaw_rate_c, h_c])
 
-            self.update_state_mat(command_output,command_input,eulers,location,body_vel,velocity,imu)
+            annotations = self.update_state_mat(command_output,command_input,eulers,location,body_vel,velocity,imu)
+            positions_x = annotations['x']
+            positions_y = annotations['y']
+            positions_z = annotations['z']
+            if len(positions_x)>2:
+                positions = [[positions_x[len(positions_x)-2:len(positions_x)]],
+                             [positions_y[len(positions_x)-2:len(positions_x)]],
+                             [positions_z[len(positions_x)-2:len(positions_x)]]]
+            else:
+                 positions = [[0,0],[0,0],[0,0]]
+            total_vel = np.linalg.norm(velocity)
             if self.show_plots == True:
                 self.update_plots(command_output,command_input,eulers,location,body_vel,velocity,imu)
             if self.optical > 2:
@@ -608,8 +638,35 @@ class holodeck_fly:
                         self.yaw_c_obstacle = self.obstacle_avoidance(olvs,orvs)
                         # print (self.yaw_c_obstacle)
                         self.v_c_opt = self.v_c_canyon
+            if self.vis_odom_flag == 1:
+                frame = pixels
 
+                img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                track_points = vo.update(img,total_vel,positions)
+                for (x,y) in track_points:
+                    cv2.circle(img,(x,y),1,(0,255,0),1)
+                cur_t = vo.cur_t
+                if (self.img_id > 2):
+                    x,y,z = cur_t[0],cur_t[1],cur_t[2]
+                else:
+                    x,y,z = 0.,0.,0.
+                draw_x,draw_y = int(z)+300,int(x)+300
+                true_x,true_y = int(vo.trueX)+300,int(vo.trueY)+300
 
+                cv2.circle(traj, (draw_x,draw_y),1,(self.img_id*255/4540,255-self.img_id*255/4540,0),1)
+                cv2.circle(traj, (true_x,true_y),1,(0,0,255),2)
+                cv2.rectangle(traj,(10,20),(600,60),(0,0,0),-1)
+                text = "Coordinates: x=%2fm y=%2fm z=%2fm" %(x,y,z)
+                cv2.putText(traj,text,(20,40),cv2.FONT_HERSHEY_PLAIN,1,(255,255,255),1,0)
+
+                # cv2.imshow('camera view',img)
+                cv2.imshow("Forward Facing Camera",img)
+                cv2.imshow("Trajectory", traj)
+                self.img_id += 1
+                # self.prev_gray_4 = self.prev_gray_3
+                # self.prev_gray_3 = self.prev_gray_2
+                # self.prev_gray_2 = self.prev_gray
+                # self.prev_gray = frame_gray
 
             if savefile == True:
                 sio.savemat(outfile,self.state_mat)
