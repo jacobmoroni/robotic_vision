@@ -611,11 +611,12 @@ class holodeck_fly:
             positions_y = annotations['y']
             positions_z = annotations['z']
             if len(positions_x)>2:
-                positions = [[positions_x[len(positions_x)-2:len(positions_x)]],
-                             [positions_y[len(positions_x)-2:len(positions_x)]],
-                             [positions_z[len(positions_x)-2:len(positions_x)]]]
+                positions = [[positions_x[len(positions_x)-3:len(positions_x)]],
+                             [positions_y[len(positions_x)-3:len(positions_x)]],
+                             [positions_z[len(positions_x)-3:len(positions_x)]]]
             else:
-                 positions = [[0,0],[0,0],[0,0]]
+                 positions = [[0,0,0],[0,0,0],[0,0,0]]
+            positions = np.squeeze(positions)
             total_vel = np.linalg.norm(velocity)
             if self.show_plots == True:
                 self.update_plots(command_output,command_input,eulers,location,body_vel,velocity,imu)
