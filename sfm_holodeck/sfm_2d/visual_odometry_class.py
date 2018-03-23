@@ -55,6 +55,7 @@ class VisualOdometry:
         self.trueX, self.trueY, self.trueZ = 0,0,0
         self.detector = cv2.FastFeatureDetector_create(threshold = 25, nonmaxSuppression = True)
         self.k_scale = .622 #this is the scale used for every other frame
+        self.px_cur = np.array([0,0])
         # self.k_scale = .68
         # self.annotations = state_data
 
@@ -155,4 +156,5 @@ class VisualOdometry:
         self.intermediate_frame = self.new_frame
         # self.last_frame = self.new_frame
         P = np.hstack((self.cur_R,self.cur_t))
+        print (self.px_cur)
         return self.px_cur,P
