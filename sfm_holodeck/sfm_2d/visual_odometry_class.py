@@ -154,4 +154,5 @@ class VisualOdometry:
         self.last_frame = self.intermediate_frame
         self.intermediate_frame = self.new_frame
         # self.last_frame = self.new_frame
-        return self.px_ref_old
+        P = np.hstack((self.cur_R,self.cur_t))
+        return self.px_cur,P
