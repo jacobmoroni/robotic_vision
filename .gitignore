@@ -3,6 +3,5 @@
 HolodeckPythonBinding/
 opencv_tracking/videos/
 *.jpg
-*.png
 *.mov
 *.avi
