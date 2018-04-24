@@ -22,6 +22,7 @@ from common import anorm2, draw_str
 from time import clock
 from plotter import Plotter
 from visual_odometry_class import PinholeCamera, VisualOdometry
+from sfm_class import SfM_2d
 
 
 # import holodeck_functions
@@ -149,6 +150,8 @@ class holodeck_fly:
         self.collision_counter = 0
         self.time_to_collision = 10
         self.f_pixel = 256
+        self.track_points_prev = np.array([[0],[0]])
+        self.P_prev = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0]])
 
     def init_plots(self, plotting_freq):
         self.plotting_states = True
@@ -643,7 +646,15 @@ class holodeck_fly:
                 frame = pixels
 
                 img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                track_points = vo.update(img,total_vel,positions)
+                track_points,P = vo.update(img,total_vel,positions)
+                # if track_points == None:
+                #     track_points = np.array([[0],[0]])
+                # if P.any() == None:
+                #     P = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0]])
+                # print (P,track_points)
+                # points_3d = SfM_2d.triangulate(self.P_prev,P,self.track_points_prev,track_points)
+                # self.track_points_prev = track_points
+                # self.P_prev = P
                 for (x,y) in track_points:
                     cv2.circle(img,(x,y),1,(0,255,0),1)
                 cur_t = vo.cur_t

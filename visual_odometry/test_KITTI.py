@@ -12,7 +12,7 @@ for img_id in xrange(4541):
     img = cv2.imread('/media/jacob/Extra Space/KITTI/dataset/sequences/00/image_0/'+str(img_id).zfill(6)+'.png',0)
 
     vo.update(img, img_id)
-
+    track_points = vo.px_ref
     cur_t = vo.cur_t
     if (img_id > 2):
         x,y,z = cur_t[0],cur_t[1],cur_t[2]
@@ -26,6 +26,8 @@ for img_id in xrange(4541):
     cv2.rectangle(traj,(10,20),(600,60),(0,0,0),-1)
     text = "Coordinates: x=%2fm y=%2fm z=%2fm" %(x,y,z)
     cv2.putText(traj,text,(20,40),cv2.FONT_HERSHEY_PLAIN,1,(255,255,255),1,0)
+    # for (x,y) in track_points:
+    #     cv2.circle(img,(x,y),1,(0,255,0),2)
 
     cv2.imshow("Road Facing Camera",img)
     cv2.imshow("Trajectory", traj)
