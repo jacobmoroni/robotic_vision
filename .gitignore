@@ -6,3 +6,7 @@ opencv_tracking/videos/
 *.png
 *.mov
 *.avi
+Videos/
+MAT_files/
+visual_odometry/videos/
+an_invitation_to_3d_vision.pdf
